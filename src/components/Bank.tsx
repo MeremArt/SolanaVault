@@ -1,268 +1,210 @@
-import { FC, useCallback } from "react";
+import { FC, useCallback, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { Program, AnchorProvider, web3, BN } from "@project-serum/anchor";
+
 import { PublicKey, SystemProgram, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import { ToastContainer } from "react-toastify";
-import idl from "./vault_program.json";
+import idl from "./bank.json";
+import { Bank } from "./bank";
+import {
+  Program,
+  AnchorProvider,
+  web3,
+  utils,
+  BN,
+  setProvider,
+} from "@coral-xyz/anchor";
 
-// Define interfaces matching your IDL structure
-interface VaultState {
-  vaultBump: number;
-  stateBump: number;
-}
+const idl_string = JSON.stringify(idl);
 
-interface VaultProgramIDL {
-  version: string;
-  name: string;
-  instructions: Array<{
-    name: string;
-    accounts: Array<{
-      name: string;
-      writable?: boolean;
-      signer?: boolean;
-      pda?: {
-        seeds: Array<{
-          kind: string;
-          value?: number[];
-          path?: string;
-        }>;
-      };
-    }>;
-    args: Array<{
-      name: string;
-      type: string;
-    }>;
-  }>;
-  accounts: Array<{
-    name: string;
-    discriminator: number[];
-  }>;
-  types: Array<{
-    name: string;
-    type: {
-      kind: string;
-      fields: Array<{
-        name: string;
-        type: string;
-      }>;
-    };
-  }>;
-}
+const idl_object = JSON.parse(idl_string);
+const programId = new PublicKey(idl.address);
 
-export const Bank: FC = () => {
+export const BankV: FC = () => {
   const { connection } = useConnection();
+
   const wallet = useWallet();
-  const programId = new PublicKey(
-    "CatTg5QoJNvZFcKiL3aQGBeuiE3i1F2GZRUj1qZCWYuN"
-  );
+  const [banks, setBanks] = useState([]);
 
-  const getProvider = useCallback(() => {
-    if (!wallet || !connection) return null;
-    return new AnchorProvider(connection, wallet as any, {
-      commitment: "confirmed",
-    });
-  }, [connection, wallet]);
+  const getProvider = () => {
+    const provider = new AnchorProvider(
+      connection,
+      wallet,
+      AnchorProvider.defaultOptions()
+    );
+    setProvider(provider);
+    return provider;
+  };
 
-  const initializeVault = async () => {
-    if (!wallet.publicKey) {
-      toast.error("Please connect your wallet");
-      return;
-    }
-
+  const createBank = async () => {
     try {
-      const provider = getProvider();
-      if (!provider) {
-        toast.error("Provider not initialized");
-        return;
-      }
-
-      const program = new Program(idl as any, programId, provider);
-
-      // Derive PDAs
-      const [state] = PublicKey.findProgramAddressSync(
-        [Buffer.from("state"), wallet.publicKey.toBytes()],
-        program.programId
-      );
-
-      const [vault] = PublicKey.findProgramAddressSync(
-        [Buffer.from("vault"), state.toBytes()],
-        program.programId
-      );
-
-      const tx = await program.methods
-        .initialize()
+      const anchorProvider = getProvider();
+      const program = new Program<Bank>(idl_object, anchorProvider);
+      // this creates using the accounts and anchor derives the bank pda and system program
+      await program.methods
+        .create("Merem Bank")
         .accounts({
-          signer: wallet.publicKey,
-          state,
-          vault,
-          systemProgram: SystemProgram.programId,
+          user: anchorProvider.publicKey,
         })
         .rpc();
 
-      await connection.confirmTransaction(tx, "confirmed");
-      toast.success("Vault initialized successfully!");
+      // this is how to get and derived the accounts incase needed using account strict method
+      // const [bank] = PublicKey.findProgramAddressSync(
+      //   [
+      //     utils.bytes.utf8.encode("bankaccount"),
+      //     anchorProvider.publicKey.toBuffer(),
+      //   ],
+      //   program.programId
+      // );
+
+      // await program.methods.create("Merem Bank").accountsStrict({
+      //   bank,
+      //   user: anchorProvider.publicKey,
+      //   systemProgram: web3.SystemProgram.programId,
+      // });
+      toast.success("Welcome to Merem Bank");
     } catch (error) {
-      console.error("Initialization error:", error);
-      toast.error(`Failed to initialize vault: ${error.message}`);
+      console.log("Error while creating a bank:" + error);
     }
   };
 
-  const deposit = async () => {
-    if (!wallet.publicKey) {
-      toast.error("Please connect your wallet");
-      return;
-    }
-
+  const getBanks = async (publicKey) => {
     try {
-      const provider = getProvider();
-      if (!provider) {
-        toast.error("Provider not initialized");
-        return;
-      }
+      const anchProvider = getProvider();
+      const program = new Program<Bank>(idl_object, anchProvider);
+      Promise.all(
+        (await connection.getParsedProgramAccounts(programId)).map(
+          async (bank) => ({
+            ...(await program.account.bank.fetch(bank.pubkey)),
+            pubkey: bank.pubkey,
+          })
+        )
+      ).then((banks) => {
+        console.log(banks);
+        setBanks(banks);
+      });
+      toast.success("Account Details Fetched");
+    } catch (error) {
+      console.error("Error while getting banks: " + error);
+      toast.error("Error while getting bank details:" + error);
+    }
+  };
 
-      const program = new Program(idl as any, programId, provider);
+  const depositBank = async (publicKey) => {
+    try {
+      const anchorProvider = getProvider();
+      const program = new Program<Bank>(idl_object, anchorProvider);
 
-      // Derive PDAs
-      const [state] = PublicKey.findProgramAddressSync(
-        [Buffer.from("state"), wallet.publicKey.toBytes()],
-        program.programId
-      );
-
-      const [vault] = PublicKey.findProgramAddressSync(
-        [Buffer.from("vault"), state.toBytes()],
-        program.programId
-      );
-
-      const amount = new BN(0.1 * LAMPORTS_PER_SOL);
-
-      const tx = await program.methods
-        .deposit(amount)
+      await program.methods
+        .deposit(new BN(0.1 * web3.LAMPORTS_PER_SOL))
         .accounts({
-          signer: wallet.publicKey,
-          state,
-          vault,
-          systemProgram: SystemProgram.programId,
+          bank: publicKey,
+          user: anchorProvider.publicKey,
         })
         .rpc();
 
-      await connection.confirmTransaction(tx, "confirmed");
-      toast.success("Deposit successful!");
+      toast.success("Deposit confirmed" + publicKey);
     } catch (error) {
-      console.error("Deposit error:", error);
-      if (error.message?.includes("custom program error: 0x0")) {
-        toast.error("Vault not initialized. Initializing...");
-        await initializeVault();
-      } else {
-        toast.error(`Deposit failed: ${error.message}`);
-      }
+      console.log("Error while depositing in bank:" + error);
+
+      toast.error("Error while depositing in bank:");
     }
   };
 
-  const withdraw = async (amount: number) => {
-    if (!wallet.publicKey) {
-      toast.error("Please connect your wallet");
-      return;
-    }
-
+  const withdrawBank = async (publicKey) => {
     try {
-      const provider = getProvider();
-      if (!provider) {
-        toast.error("Provider not initialized");
-        return;
-      }
+      const anchorProvider = getProvider();
+      const program = new Program<Bank>(idl_object, anchorProvider);
 
-      const program = new Program(idl as any, programId, provider);
-
-      const [state] = PublicKey.findProgramAddressSync(
-        [Buffer.from("state"), wallet.publicKey.toBytes()],
-        program.programId
-      );
-
-      const [vault] = PublicKey.findProgramAddressSync(
-        [Buffer.from("vault"), state.toBytes()],
-        program.programId
-      );
-
-      const lamportsAmount = new BN(amount * LAMPORTS_PER_SOL);
-
-      const tx = await program.methods
-        .withdraw(lamportsAmount)
+      await program.methods
+        .withdraw(new BN(0.1 * web3.LAMPORTS_PER_SOL))
         .accounts({
-          signer: wallet.publicKey,
-          state,
-          vault,
-          systemProgram: SystemProgram.programId,
+          bank: publicKey,
+          user: anchorProvider.publicKey,
         })
         .rpc();
 
-      await connection.confirmTransaction(tx, "confirmed");
-      toast.success("Withdrawal successful!");
+      toast.success("Withdraw confirmed for " + publicKey);
+
+      // Refresh banks after withdrawal
+      await getBanks(anchorProvider.publicKey);
     } catch (error) {
-      console.error("Withdrawal error:", error);
-      toast.error(`Withdrawal failed: ${error.message}`);
+      console.log("Error while Withdrawing from bank:", error);
+      toast.error("Error while Withdrawing from bank: " + error.message);
     }
   };
-
   return (
-    <div className="flex flex-col items-center gap-4">
-      <div className="flex flex-row justify-center gap-4">
-        <div className="relative group">
-          <div
-            className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-fuchsia-500 
-              rounded-lg blur opacity-20 group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-tilt"
-          ></div>
-          <button
-            className="relative group w-60 btn animate-pulse bg-gradient-to-br from-indigo-500 to-fuchsia-500 hover:from-white hover:to-purple-300 text-black"
-            onClick={() => deposit()}
-            disabled={!wallet.publicKey}
-          >
-            <div className="hidden group-disabled:block">
-              Wallet not connected
-            </div>
-            <span className="block group-disabled:hidden">Deposit 0.1 SOL</span>
-          </button>
-        </div>
-
-        <div className="relative group">
-          <div
-            className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-fuchsia-500 
-              rounded-lg blur opacity-20 group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-tilt"
-          ></div>
-          <button
-            className="relative group w-60 btn animate-pulse bg-gradient-to-br from-indigo-500 to-fuchsia-500 hover:from-white hover:to-purple-300 text-black"
-            onClick={() => withdraw(0.1)}
-            disabled={!wallet.publicKey}
-          >
-            <div className="hidden group-disabled:block">
-              Wallet not connected
-            </div>
-            <span className="block group-disabled:hidden">
-              Withdraw 0.1 SOL
-            </span>
-          </button>
-        </div>
-      </div>
-
-      <div className="relative group">
-        <div
-          className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-fuchsia-500 
-            rounded-lg blur opacity-20 group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-tilt"
-        ></div>
-        <button
-          className="relative group w-60 btn animate-pulse bg-gradient-to-br from-indigo-500 to-fuchsia-500 hover:from-white hover:to-purple-300 text-black"
-          onClick={initializeVault}
-          disabled={!wallet.publicKey}
-        >
-          <div className="hidden group-disabled:block">
-            Wallet not connected
+    <div>
+      {banks.map((bank) => {
+        return (
+          // eslint-disable-next-line react/jsx-key
+          <div className="md:hero-content flex flex-col">
+            <h1>{bank.name.toString()}</h1>
+            <span>{bank.balance.toString() / web3.LAMPORTS_PER_SOL}</span>
+            <button
+              className="group w-60 m-2 btn animate-pulse bg-gradient-to-br from-indigo-500 to-fuchsia-500 hover:from-white hover:to-purple-300 text-black"
+              onClick={() => depositBank(bank.pubkey)}
+            >
+              <span>Deposit 0.1</span>
+            </button>
           </div>
-          <span className="block group-disabled:hidden">Initialize Vault</span>
-        </button>
-      </div>
+        );
+      })}
+      <div className="flex flex-col items-center gap-4">
+        <div className="flex flex-row justify-center">
+          {banks.map((bank) => {
+            return (
+              <div
+                key={bank.pubkey.toString()}
+                className="md:hero-content flex flex-col"
+              >
+                <button
+                  className="group w-60  btn animate-pulse bg-gradient-to-br from-indigo-500 to-fuchsia-500 hover:from-white hover:to-purple-300 text-black"
+                  onClick={() => withdrawBank(bank.pubkey)}
+                >
+                  <span>Withdraw 0.1</span>
+                </button>
+              </div>
+            );
+          })}
+        </div>
 
-      <ToastContainer />
+        <div className="relative group">
+          <div
+            className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-fuchsia-500 
+            rounded-lg blur opacity-20 group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-tilt"
+          ></div>
+          <button
+            className="relative group w-60 btn animate-pulse bg-gradient-to-br from-indigo-500 to-fuchsia-500 hover:from-white hover:to-purple-300 text-black"
+            onClick={createBank}
+            disabled={!wallet.publicKey}
+          >
+            <div className="hidden group-disabled:block">
+              Wallet not connected
+            </div>
+            <span className="block group-disabled:hidden">Create Account</span>
+          </button>
+        </div>
+        <div className="relative group">
+          <div
+            className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-fuchsia-500 
+            rounded-lg blur opacity-20 group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-tilt"
+          ></div>
+          <button
+            className="relative group w-60 btn animate-pulse bg-gradient-to-br from-indigo-500 to-fuchsia-500 hover:from-white hover:to-purple-300 text-black"
+            onClick={getBanks}
+            disabled={!wallet.publicKey}
+          >
+            <div className="hidden group-disabled:block">
+              Wallet not connected
+            </div>
+            <span className="block group-disabled:hidden">Account details</span>
+          </button>
+        </div>
+
+        <ToastContainer />
+      </div>
     </div>
   );
 };

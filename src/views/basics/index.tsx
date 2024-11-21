@@ -1,5 +1,5 @@
 import { FC } from "react";
-import { Bank } from "components/Bank";
+import { BankV } from "components/Bank";
 
 export const BasicsView: FC = ({}) => {
   return (
@@ -10,7 +10,7 @@ export const BasicsView: FC = ({}) => {
         </h1>
         {/* CONTENT GOES HERE */}
         <div className="text-center">
-          <Bank />
+          <BankV />
         </div>
       </div>
     </div>
